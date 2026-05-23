@@ -78,6 +78,18 @@ function App() {
   const [toastMsg, setToastMsg] = useState(null);
   const [citePopover, setCitePopover] = useState(null); // { id, anchor }
   const [isStreaming, setIsStreaming] = useState(false);
+  const [appView, setAppView] = useState(persisted.appView || 'chat');
+  const validAdminTab = (t) => (t === 'audit' || t === 'users' || t === 'projects' ? t : 'audit');
+  const [adminTab, setAdminTabState] = useState(validAdminTab(persisted.adminTab || 'audit'));
+  const [adminSelection, setAdminSelectionState] = useState(persisted.adminSelection || null);
+  const [adminFilters, setAdminFiltersState] = useState(
+    persisted.adminFilters || { userId: null, projectId: null, query: '', eventType: 'all' }
+  );
+  const [adminUnlocked, setAdminUnlocked] = useState(
+    persisted.adminUnlocked ?? (typeof readAdminUnlocked === 'function' ? readAdminUnlocked() : false)
+  );
+  const [adminAuthOpen, setAdminAuthOpen] = useState(false);
+  const [adminAuthError, setAdminAuthError] = useState(null);
   const hideTimer = useRef(null);
 
   const currentUser = projects[0]?.users.find(u => u.you) || { id: 'rs', initials: 'RS', name: 'Ryan Sandoval', role: 'admin', color: 'user-1' };
@@ -88,9 +100,10 @@ function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         currentProjectId, currentSessionId, openProjects, historyFilter, acc,
         sidebarMode, standaloneChats, currentStandaloneChatId,
+        appView, adminTab, adminSelection, adminFilters, adminUnlocked,
       }));
     } catch (e) {}
-  }, [currentProjectId, currentSessionId, openProjects, historyFilter, acc, sidebarMode, standaloneChats, currentStandaloneChatId]);
+  }, [currentProjectId, currentSessionId, openProjects, historyFilter, acc, sidebarMode, standaloneChats, currentStandaloneChatId, appView, adminTab, adminSelection, adminFilters, adminUnlocked]);
 
   // Toast
   const toast = (msg) => {
@@ -440,6 +453,7 @@ function App() {
   const session = project?.sessions.find(s => s.id === currentSessionId);
   const standalone = standaloneChats.find(c => c.id === currentStandaloneChatId);
   const inChatMode = sidebarMode === 'chat';
+  const inAdminView = appView === 'admin';
   const activeSession = inChatMode ? standalone : session;
   const isEmptySession = activeSession && activeSession.messages.length === 0;
 
@@ -464,14 +478,71 @@ function App() {
     newProjectOpen, openNewProject, closeNewProject, createProject,
     citePopover, showCite, hideCiteSoon, cancelHideCite,
     toast,
+    appView,
+    adminUnlocked,
+    adminAuthOpen,
+    adminAuthError,
+    adminTab,
+    adminSelection,
+    adminFilters,
+    openAdmin: () => {
+      setAppView('admin');
+      setAdminTabState('audit');
+      setAdminSelectionState(null);
+      setAdminFiltersState({ userId: null, projectId: null, query: '', eventType: 'all' });
+    },
+    requestAdmin: () => {
+      if (adminUnlocked) {
+        setAppView('admin');
+        setAdminTabState('audit');
+        setAdminSelectionState(null);
+        setAdminFiltersState({ userId: null, projectId: null, query: '', eventType: 'all' });
+      } else {
+        setAdminAuthOpen(true);
+        setAdminAuthError(null);
+      }
+    },
+    closeAdminAuth: () => {
+      setAdminAuthOpen(false);
+      setAdminAuthError(null);
+    },
+    submitAdminPasscode: (code) => {
+      const pass = typeof ADMIN_DEMO_PASSCODE !== 'undefined' ? ADMIN_DEMO_PASSCODE : 'wecc-admin';
+      if (code === pass) {
+        if (typeof persistAdminUnlocked === 'function') persistAdminUnlocked(true);
+        setAdminUnlocked(true);
+        setAdminAuthOpen(false);
+        setAdminAuthError(null);
+        setAppView('admin');
+        setAdminTabState('audit');
+        setAdminSelectionState(null);
+        setAdminFiltersState({ userId: null, projectId: null, query: '', eventType: 'all' });
+      } else {
+        setAdminAuthError('Incorrect demo passcode');
+      }
+    },
+    exitAdmin: () => {
+      setAppView('chat');
+      setAdminSelectionState(null);
+    },
+    setAdminTab: (tab) => {
+      setAdminTabState(validAdminTab(tab));
+      setAdminSelectionState(null);
+    },
+    setAdminSelection: setAdminSelectionState,
+    setAdminFilters: (fn) => {
+      setAdminFiltersState(prev => (typeof fn === 'function' ? fn(prev) : fn));
+    },
   };
 
   return (
-    <div className={`app ${inChatMode || !project ? 'no-right' : ''}`}>
+    <div className={`app ${inAdminView || inChatMode || !project ? 'no-right' : ''}${inAdminView ? ' admin-active' : ''}`}>
       <div className="topbar">
         <span className="logo">WECC</span>
         <div className="crumbs">
-          {inChatMode ? (
+          {inAdminView ? (
+            <AdminBreadcrumbs store={store}/>
+          ) : inChatMode ? (
             <span className="project">{standalone?.title || 'General chat'}</span>
           ) : (
             <>
@@ -484,22 +555,30 @@ function App() {
           )}
         </div>
         <span className="sep-flex"/>
+        {!inAdminView && <TopbarAuditButton store={store}/>}
       </div>
 
       <Sidebar store={store}/>
 
-      <div className={`chat${isEmptySession ? ' chat-empty-session' : ''}`}>
-        <ChatHead store={store}/>
-        <Thread store={store}/>
-        <Composer store={store}/>
+      <div className={`chat${!inAdminView && isEmptySession ? ' chat-empty-session' : ''}`}>
+        {inAdminView ? (
+          <AdminView store={store}/>
+        ) : (
+          <>
+            <ChatHead store={store}/>
+            <Thread store={store}/>
+            <Composer store={store}/>
+          </>
+        )}
       </div>
 
-      {!inChatMode && project && <RightPanel store={store}/>}
+      {!inAdminView && !inChatMode && project && <RightPanel store={store}/>}
 
       <Palette store={store}/>
       <NewProjectModal store={store}/>
       <InviteModal store={store}/>
       <UploadModal store={store}/>
+      <AdminAuthModal store={store}/>
       <CitePopover store={store}/>
       {toastMsg && <div className="toast">{toastMsg}</div>}
     </div>

@@ -29,6 +29,8 @@ function Icon({ name, size = 14 }) {
     cmd:    <path d="M5 3.5a1.5 1.5 0 1 1 1.5 1.5H11a1.5 1.5 0 1 1-1.5 1.5V11A1.5 1.5 0 1 1 8 12.5H5A1.5 1.5 0 1 1 6.5 11V6.5H5z"/>,
     book:   <path d="M3 3v10l5-1 5 1V3l-5 1-5-1z"/>,
     spark:  <><path d="M8 2l1.2 2.4 2.6.4-1.9 1.8.5 2.4L8 9.8 5.1 11.6l.5-2.4-1.9-1.8 2.6-.4L8 2z"/></>,
+    lock:   <><rect x="4.5" y="7" width="7" height="6.5" rx="1"/><path d="M6 7V5.2a2 2 0 0 1 4 0V7"/></>,
+    arrowLeft: <path d="M10 8H3M6 5 3 8l3 3"/>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -80,6 +82,223 @@ function InviteModal({ store }) {
   );
 }
 
+const ADMIN_DEMO_PASSCODE = 'wecc-admin';
+const ADMIN_UNLOCK_KEY = 'wecc-admin-unlocked-v1';
+
+function readAdminUnlocked() {
+  try { return sessionStorage.getItem(ADMIN_UNLOCK_KEY) === '1'; } catch (e) { return false; }
+}
+
+function persistAdminUnlocked(unlocked) {
+  try {
+    if (unlocked) sessionStorage.setItem(ADMIN_UNLOCK_KEY, '1');
+    else sessionStorage.removeItem(ADMIN_UNLOCK_KEY);
+  } catch (e) {}
+}
+
+function AdminAuthModal({ store }) {
+  const { adminAuthOpen, adminAuthError, closeAdminAuth, submitAdminPasscode } = store;
+  const [passcode, setPasscode] = useState('');
+
+  useEffect(() => {
+    if (adminAuthOpen) setPasscode('');
+  }, [adminAuthOpen]);
+
+  if (!adminAuthOpen) return null;
+
+  const submit = () => submitAdminPasscode(passcode.trim());
+
+  return (
+    <div className="modal-back admin-auth-back" onClick={closeAdminAuth}>
+      <div className="modal admin-auth-modal" onClick={e => e.stopPropagation()}>
+        <h3>Unlock audit view</h3>
+        <div className="sub">Demo gate for privileged AI usage visibility.</div>
+        <label>
+          <div className="lab">Demo passcode</div>
+          <input
+            type="password"
+            autoFocus
+            placeholder="Enter demo passcode"
+            value={passcode}
+            onChange={e => setPasscode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()}
+            autoComplete="off"
+          />
+        </label>
+        {adminAuthError && <div className="admin-auth-error" role="alert">{adminAuthError}</div>}
+        <div className="actions">
+          <button type="button" className="cancel" onClick={closeAdminAuth}>Cancel</button>
+          <button type="button" className="primary" disabled={!passcode.trim()} onClick={submit}>Unlock</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getAdminBreadcrumbDetail(store) {
+  const { adminSelection, projects, standaloneChats } = store;
+  if (!adminSelection) return null;
+  const snippets = typeof SNIPPETS !== 'undefined' ? SNIPPETS : {};
+  if (typeof deriveAuditIndexes !== 'function') return 'Detail';
+  const { turns, users, adminProjects } = deriveAuditIndexes(projects, standaloneChats || [], snippets);
+  if (adminSelection.type === 'turn') {
+    const t = turns.find(x => x.id === adminSelection.id);
+    const text = t?.input?.text || '';
+    return text ? text.slice(0, 42) + (text.length > 42 ? '…' : '') : 'Query turn';
+  }
+  if (adminSelection.type === 'user') {
+    return users.find(u => u.id === adminSelection.id)?.name || 'User';
+  }
+  if (adminSelection.type === 'project') {
+    const p = adminProjects.find(x => x.id === adminSelection.id);
+    return p?.name ? (p.name.length > 36 ? p.name.slice(0, 36) + '…' : p.name) : 'Project';
+  }
+  return 'Detail';
+}
+
+const ADMIN_BREADCRUMB_TABS = [
+  { id: 'audit', label: 'Audit log' },
+  { id: 'users', label: 'Users' },
+  { id: 'projects', label: 'Projects' },
+];
+
+function CustomDropdown({ value, options, onChange, ariaLabel, variant = 'crumb' }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const current = options.find(o => o.id === value) || options[0];
+  const label = current?.label ?? '—';
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!rootRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (id) => {
+    onChange(id);
+    setOpen(false);
+  };
+
+  const menuClass = [
+    'crumb-tab-menu',
+    open ? 'open' : '',
+    variant === 'field' ? 'field' : '',
+  ].filter(Boolean).join(' ');
+
+  const triggerClass = [
+    'crumb-tab-trigger',
+    variant === 'crumb' ? 'session' : 'field',
+  ].filter(Boolean).join(' ');
+
+  return (
+    <div className={menuClass} ref={rootRef}>
+      <button
+        type="button"
+        className={triggerClass}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel || label}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="crumb-tab-label">{label}</span>
+        <span className="crumb-tab-chev" aria-hidden><Icon name="chevD" size={10}/></span>
+      </button>
+      {open && (
+        <div className="crumb-tab-dropdown" role="listbox" aria-label={ariaLabel}>
+          {options.map(opt => (
+            <button
+              type="button"
+              key={opt.id || '__empty'}
+              role="option"
+              aria-selected={value === opt.id}
+              className={value === opt.id ? 'cur' : ''}
+              onClick={() => pick(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminBreadcrumbTabMenu({ store }) {
+  const { adminTab, setAdminTab, setAdminSelection } = store;
+  const tabValue = ADMIN_BREADCRUMB_TABS.some(t => t.id === adminTab) ? adminTab : 'audit';
+  return (
+    <CustomDropdown
+      value={tabValue}
+      options={ADMIN_BREADCRUMB_TABS}
+      onChange={(id) => {
+        if (ADMIN_BREADCRUMB_TABS.some(t => t.id === id)) {
+          setAdminTab(id);
+          setAdminSelection(null);
+        }
+      }}
+      ariaLabel="Audit section"
+      variant="crumb"
+    />
+  );
+}
+
+function AdminBreadcrumbs({ store }) {
+  const { adminSelection, setAdminTab, setAdminSelection } = store;
+  const detailLabel = adminSelection ? getAdminBreadcrumbDetail(store) : null;
+  const onAdminRoot = () => {
+    setAdminTab('audit');
+    setAdminSelection(null);
+  };
+
+  return (
+    <>
+      <span className="sep">/</span>
+      <button type="button" className="crumb-btn project admin-crumb" onClick={onAdminRoot}>
+        Admin
+      </button>
+      <span className="sep">/</span>
+      <AdminBreadcrumbTabMenu store={store}/>
+      {detailLabel && (
+        <>
+          <span className="sep">/</span>
+          <span className="session current" title={detailLabel}>{detailLabel}</span>
+        </>
+      )}
+    </>
+  );
+}
+
+function TopbarAuditButton({ store }) {
+  const { adminUnlocked, requestAdmin } = store;
+  return (
+    <button
+      type="button"
+      className={'topbar-audit-pill' + (adminUnlocked ? ' unlocked' : ' locked')}
+      onClick={requestAdmin}
+      title={adminUnlocked ? 'Open audit view' : 'Unlock audit view (demo passcode)'}
+      aria-label={adminUnlocked ? 'Open audit view' : 'Unlock audit view'}
+    >
+      {!adminUnlocked && (
+        <span className="audit-lock" aria-hidden>
+          <Icon name="lock" size={11}/>
+        </span>
+      )}
+      <span className="audit-label">Audit</span>
+      {!adminUnlocked && <span className="audit-badge">locked</span>}
+    </button>
+  );
+}
+
 function UploadModal({ store }) {
   const { uploadModalOpen, uploadProjectId, projects, closeUploadModal, simulateUpload } = store;
   const project = projects.find(p => p.id === uploadProjectId);
@@ -105,9 +324,25 @@ function UploadModal({ store }) {
 
 function SidebarModeSwitch({ mode, onChange }) {
   return (
-    <div className="sb-mode">
-      <button className={mode === 'chat' ? 'on' : ''} onClick={() => onChange('chat')}>Chat</button>
-      <button className={mode === 'projects' ? 'on' : ''} onClick={() => onChange('projects')}>Projects</button>
+    <div className="sb-mode" role="tablist" aria-label="Sidebar view">
+      <span
+        className={'sb-mode-pill' + (mode === 'projects' ? ' right' : '')}
+        aria-hidden
+      />
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'chat'}
+        className={mode === 'chat' ? 'on' : ''}
+        onClick={() => onChange('chat')}
+      >Chat</button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'projects'}
+        className={mode === 'projects' ? 'on' : ''}
+        onClick={() => onChange('projects')}
+      >Projects</button>
     </div>
   );
 }
@@ -541,4 +776,8 @@ function FilesAcc({ open, onToggle, project, store }) {
   );
 }
 
-Object.assign(window, { Sidebar, RightPanel, Avatar, Icon, InviteModal, UploadModal });
+Object.assign(window, {
+  Sidebar, RightPanel, Avatar, Icon, InviteModal, UploadModal,
+  AdminAuthModal, TopbarAuditButton, AdminBreadcrumbs, CustomDropdown,
+  ADMIN_DEMO_PASSCODE, ADMIN_UNLOCK_KEY, readAdminUnlocked, persistAdminUnlocked,
+});

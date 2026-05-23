@@ -114,10 +114,29 @@ technical answers in Markdown.`,
       paletteOpen: false,
       acc: { instructions: false, users: true, files: true },
       sourceDrawer: null, libraryOpen: false, mobileOpen: false,
+      appView: 'chat',
     }),
   },
 
-  // 9 — File library at scale
+  // 9 — Admin audit: review cross-domain AI usage
+  { id: 'admin', label: 'Admin audit',
+    apply: (set, { projects: allProj }) => set({
+      projects: [ withFinishedAnswer(allProj[0], 'fresh'), allProj[3] ],
+      currentProjectId: 'atlas', currentSessionId: 's-atlas-1',
+      openProjects: { atlas: true },
+      paletteOpen: false,
+      libraryOpen: false, mobileOpen: false, sourceDrawer: null,
+      appView: 'admin',
+      adminUnlocked: true,
+      adminAuthOpen: false,
+      adminAuthError: null,
+      adminTab: 'audit',
+      adminSelection: { type: 'turn', id: 'atlas:s-atlas-1:0' },
+      adminFilters: { userId: 'mb', projectId: 'atlas', query: '', eventType: 'all' },
+    }),
+  },
+
+  // 10 — File library at scale
   { id: 'library', label: 'Files at scale',
     apply: (set, { projects: allProj }) => set({
       projects: [ withFinishedAnswer(allProj[0], 'fresh'), allProj[3] ],
@@ -126,10 +145,11 @@ technical answers in Markdown.`,
       paletteOpen: false,
       libraryOpen: true,
       sourceDrawer: null, mobileOpen: false,
+      appView: 'chat',
     }),
   },
 
-  // 10 — Mobile inset
+  // 11 — Mobile inset
   { id: 'mobile', label: 'Mobile view',
     apply: (set, { projects: allProj }) => set({
       projects: [ withFinishedAnswer(allProj[0], 'fresh'), allProj[3] ],
@@ -139,10 +159,11 @@ technical answers in Markdown.`,
       libraryOpen: false,
       sourceDrawer: null,
       mobileOpen: true,
+      appView: 'chat',
     }),
   },
 
-  // 11 — Final cover
+  // 12 — Final cover
   { id: 'end', label: 'Wrap', cover: 'end' },
 ]);
 
@@ -215,6 +236,13 @@ function DemoApp() {
     inviteProjectId: null,
     uploadModalOpen: false,
     uploadProjectId: null,
+    appView: 'chat',
+    adminUnlocked: typeof readAdminUnlocked === 'function' ? readAdminUnlocked() : false,
+    adminAuthOpen: false,
+    adminAuthError: null,
+    adminTab: 'audit',
+    adminSelection: null,
+    adminFilters: { userId: null, projectId: null, query: '', eventType: 'all' },
   });
   const set = (patch) => setS(prev => ({ ...prev, ...patch }));
 
@@ -403,6 +431,58 @@ function DemoApp() {
       if (hideCiteTimer.current) clearTimeout(hideCiteTimer.current);
     },
     toast,
+    appView: s.appView,
+    adminUnlocked: s.adminUnlocked,
+    adminAuthOpen: s.adminAuthOpen,
+    adminAuthError: s.adminAuthError,
+    adminTab: s.adminTab,
+    adminSelection: s.adminSelection,
+    adminFilters: s.adminFilters,
+    openAdmin: () => set({
+      appView: 'admin',
+      adminTab: 'audit',
+      adminSelection: null,
+      adminFilters: { userId: null, projectId: null, query: '', eventType: 'all' },
+    }),
+    requestAdmin: () => {
+      if (s.adminUnlocked) {
+        set({
+          appView: 'admin',
+          adminTab: 'audit',
+          adminSelection: null,
+          adminFilters: { userId: null, projectId: null, query: '', eventType: 'all' },
+        });
+      } else {
+        set({ adminAuthOpen: true, adminAuthError: null });
+      }
+    },
+    closeAdminAuth: () => set({ adminAuthOpen: false, adminAuthError: null }),
+    submitAdminPasscode: (code) => {
+      const pass = typeof ADMIN_DEMO_PASSCODE !== 'undefined' ? ADMIN_DEMO_PASSCODE : 'wecc-admin';
+      if (code === pass) {
+        if (typeof persistAdminUnlocked === 'function') persistAdminUnlocked(true);
+        set({
+          adminUnlocked: true,
+          adminAuthOpen: false,
+          adminAuthError: null,
+          appView: 'admin',
+          adminTab: 'audit',
+          adminSelection: null,
+          adminFilters: { userId: null, projectId: null, query: '', eventType: 'all' },
+        });
+      } else {
+        set({ adminAuthError: 'Incorrect demo passcode' });
+      }
+    },
+    exitAdmin: () => set({ appView: 'chat', adminSelection: null }),
+    setAdminTab: (tab) => {
+      const valid = tab === 'audit' || tab === 'users' || tab === 'projects' ? tab : 'audit';
+      set({ adminTab: valid, adminSelection: null });
+    },
+    setAdminSelection: (sel) => set({ adminSelection: sel }),
+    setAdminFilters: (fn) => set({
+      adminFilters: typeof fn === 'function' ? fn(s.adminFilters) : fn,
+    }),
   };
 
   // ─── Demo-specific sendMessage with streaming ───────────────
@@ -522,6 +602,7 @@ For polling at the WECC edge, use the HC variant or you'll lose data between sam
   const session = project?.sessions.find(x => x.id === s.currentSessionId);
   const standalone = s.standaloneChats.find(c => c.id === s.currentStandaloneChatId);
   const inChatMode = s.sidebarMode === 'chat';
+  const inAdminView = s.appView === 'admin';
   const activeSession = inChatMode ? standalone : session;
   const isEmptySession = activeSession && activeSession.messages.length === 0;
 
@@ -568,11 +649,13 @@ For polling at the WECC edge, use the HC variant or you'll lose data between sam
       )}
 
       {!isCover && (
-        <div className={`app ${inChatMode || !project ? 'no-right' : ''}`}>
+        <div className={`app ${inAdminView || inChatMode || !project ? 'no-right' : ''}${inAdminView ? ' admin-active' : ''}`}>
           <div className="topbar">
             <span className="logo">WECC</span>
             <div className="crumbs">
-              {inChatMode ? (
+              {inAdminView ? (
+                <AdminBreadcrumbs store={store}/>
+              ) : inChatMode ? (
                 <span className="project">{standalone?.title || 'General chat'}</span>
               ) : (
                 <>
@@ -585,16 +668,19 @@ For polling at the WECC edge, use the HC variant or you'll lose data between sam
               )}
             </div>
             <span className="sep-flex"/>
+            {!inAdminView && <TopbarAuditButton store={store}/>}
           </div>
 
-          {project || inChatMode ? (
+          {project || inChatMode || inAdminView ? (
             <Sidebar store={store}/>
           ) : (
             <ColdSidebar/>
           )}
 
-          <div className={`chat${isEmptySession ? ' chat-empty-session' : ''}`}>
-            {project || inChatMode ? (
+          <div className={`chat${!inAdminView && isEmptySession ? ' chat-empty-session' : ''}`}>
+            {inAdminView ? (
+              <AdminView store={store}/>
+            ) : project || inChatMode ? (
               <>
                 <ChatHead store={store}/>
                 <Thread store={store}/>
@@ -605,7 +691,7 @@ For polling at the WECC edge, use the HC variant or you'll lose data between sam
             )}
           </div>
 
-          {!inChatMode && project && <RightPanel store={store}/>}
+          {!inAdminView && !inChatMode && project && <RightPanel store={store}/>}
 
           {/* Modals + overlays */}
           {s.paletteOpen && (
@@ -632,6 +718,7 @@ For polling at the WECC edge, use the HC variant or you'll lose data between sam
           <CitePopover store={store}/>
           <InviteModal store={store}/>
           <UploadModal store={store}/>
+          <AdminAuthModal store={store}/>
 
           {/* Backdrop dims chat while drawer is open */}
           <div className={`src-drawer-back ${s.sourceDrawer ? 'open' : ''}`} onClick={() => set({ sourceDrawer: null })}/>
