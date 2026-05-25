@@ -304,22 +304,21 @@ function deriveAuditSummary(projects, turns, users) {
     userCount: users.length,
     fileCount: projects.reduce((n, p) => n + (p.fileCountTotal || p.files?.length || 0), 0),
     queryCount: queryTurns.length,
-    noContextCount: queryTurns.filter(t => t.output?.noContext).length,
     failedIngestCount: turns.filter(t => t.type === 'file.ingest_failed').length,
   };
 }
 
 function deriveAdminInsights(turns, users, projects) {
   const queryTurns = turns.filter(t => t.type === 'query.turn');
-  const buckets = Array.from({ length: 12 }, (_, i) => ({
-    label: `${11 - i}h`,
+  const buckets = Array.from({ length: 7 }, (_, i) => ({
+    label: `${6 - i}d`,
     count: 0,
-  })).reverse();
+  }));
   const now = Date.now();
   queryTurns.forEach(t => {
-    const hoursAgo = Math.floor((now - t.at) / 3600_000);
-    if (hoursAgo >= 0 && hoursAgo < buckets.length) {
-      buckets[buckets.length - 1 - hoursAgo].count++;
+    const daysAgo = Math.floor((now - t.at) / 86400_000);
+    if (daysAgo >= 0 && daysAgo < buckets.length) {
+      buckets[buckets.length - 1 - daysAgo].count++;
     }
   });
 
@@ -332,51 +331,10 @@ function deriveAdminInsights(turns, users, projects) {
     .sort((a, b) => b.value - a.value)
     .slice(0, 5);
 
-  const cited = {};
-  queryTurns.forEach(t => {
-    (t.output?.cites || []).forEach(id => {
-      const file = t.retrieval?.chunks?.find(c => c.snippetId === id)?.file || id;
-      cited[file] = (cited[file] || 0) + 1;
-    });
-  });
-  const citedFiles = Object.entries(cited)
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
-
-  const noContextCount = queryTurns.filter(t => t.output?.noContext).length;
-  const totalCites = queryTurns.reduce((n, t) => n + (t.output?.cites?.length || 0), 0);
-  const avgLatency = queryTurns.length
-    ? Math.round(queryTurns.reduce((n, t) => n + (t.latencyMs || 0), 0) / queryTurns.length)
-    : 0;
-
   return {
     buckets,
     userRows,
     projectRows,
-    citedFiles,
-    signals: [
-      {
-        label: 'No-context rate',
-        value: queryTurns.length ? `${Math.round((noContextCount / queryTurns.length) * 100)}%` : '0%',
-        note: `${noContextCount} answers flagged for verification`,
-      },
-      {
-        label: 'Avg citations',
-        value: queryTurns.length ? (totalCites / queryTurns.length).toFixed(1) : '0.0',
-        note: 'citations emitted per query turn',
-      },
-      {
-        label: 'Avg latency',
-        value: avgLatency ? `${(avgLatency / 1000).toFixed(1)}s` : '—',
-        note: 'mocked generation and retrieval time',
-      },
-    ],
-    anomalies: [
-      'Spike in patent-risk questions from Atlas diligence',
-      'Runbooks produced one no-context answer in the last window',
-      'SNMPv3 hardening is the most repeated operational topic',
-    ],
   };
 }
 

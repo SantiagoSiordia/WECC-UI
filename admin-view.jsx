@@ -31,8 +31,7 @@ function AdminSummaryCards({ summary }) {
     { label: 'Projects', value: summary.projectCount },
     { label: 'Users', value: summary.userCount },
     { label: 'Files indexed', value: summary.fileCount.toLocaleString() },
-    { label: 'Query turns', value: summary.queryCount },
-    { label: 'No-context answers', value: summary.noContextCount },
+    { label: 'Queries', value: summary.queryCount },
   ];
   return (
     <div className="admin-cards">
@@ -42,15 +41,6 @@ function AdminSummaryCards({ summary }) {
           <div className="admin-card-lbl">{c.label}</div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function AdminAnalyticsPlaceholder() {
-  return (
-    <div className="admin-future">
-      <div className="admin-future-title">Analytics — coming soon</div>
-      <p>Search trends, anomaly detection, and usage dashboards will build on this audit event stream.</p>
     </div>
   );
 }
@@ -86,34 +76,20 @@ function AdminActivitySparkline({ buckets }) {
   return (
     <div className="admin-data-card admin-activity-card">
       <div className="admin-data-card-title">Query volume</div>
-      <div className="admin-sparkline" aria-label="Query volume by recent hour">
+      <div className="admin-sparkline" aria-label="Query volume by day over the last week">
         {buckets.map((b, i) => (
           <span
             key={`${b.label}-${i}`}
             className="admin-spark-bar"
-            title={`${b.count} queries ${b.label} ago`}
+            title={`${b.count} queries ${b.label === '0d' ? 'today' : `${b.label} ago`}`}
             style={{ height: `${Math.max(8, (b.count / max) * 100)}%` }}
           />
         ))}
       </div>
       <div className="admin-spark-labels">
-        <span>12h ago</span>
+        <span>Last week</span>
         <span>now</span>
       </div>
-    </div>
-  );
-}
-
-function AdminSignalCards({ signals }) {
-  return (
-    <div className="admin-signal-grid">
-      {signals.map(signal => (
-        <div className="admin-signal-card" key={signal.label}>
-          <div className="admin-signal-value">{signal.value}</div>
-          <div className="admin-signal-label">{signal.label}</div>
-          <div className="admin-signal-note">{signal.note}</div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -122,35 +98,14 @@ function AdminInsights({ insights }) {
   if (!insights) return null;
   return (
     <div className="admin-insights">
-      <div className="admin-insights-top">
-        <AdminActivitySparkline buckets={insights.buckets || []} />
-        <AdminSignalCards signals={insights.signals || []} />
-      </div>
       <div className="admin-insights-grid">
+        <AdminActivitySparkline buckets={insights.buckets || []} />
         <AdminBarList title="Top users" rows={insights.userRows || []} />
         <AdminBarList title="Top projects" rows={insights.projectRows || []} />
-        <AdminBarList title="Most cited files" rows={insights.citedFiles || []} emptyLabel="No cited files yet" />
-        <div className="admin-data-card">
-          <div className="admin-data-card-title">Signals to watch</div>
-          <div className="admin-anomaly-list">
-            {(insights.anomalies || []).map(item => (
-              <div className="admin-anomaly" key={item}>
-                <span className="admin-anomaly-dot" />
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );
 }
-
-const ADMIN_EVENT_TYPE_OPTIONS = [
-  { id: 'all', label: 'All events' },
-  { id: 'query.turn', label: 'Query turns' },
-  { id: 'file.ingest_failed', label: 'Ingest failures' },
-];
 
 function AdminFilters({ filters, setFilters, users, projects }) {
   const userOptions = useMemo(
@@ -182,25 +137,6 @@ function AdminFilters({ filters, setFilters, users, projects }) {
           options={projectOptions}
           onChange={id => setFilters({ ...filters, projectId: id || null })}
           ariaLabel="Filter by project"
-        />
-      </div>
-      <div className="admin-filter">
-        <span className="admin-filter-lbl">Type</span>
-        <AdminFilterDropdown
-          variant="field"
-          value={filters.eventType || 'all'}
-          options={ADMIN_EVENT_TYPE_OPTIONS}
-          onChange={id => setFilters({ ...filters, eventType: id })}
-          ariaLabel="Filter by event type"
-        />
-      </div>
-      <div className="admin-filter admin-filter-grow">
-        <span className="admin-filter-lbl">Search prompts</span>
-        <input
-          type="search"
-          placeholder="Filter by prompt text…"
-          value={filters.query || ''}
-          onChange={e => setFilters({ ...filters, query: e.target.value })}
         />
       </div>
     </div>
@@ -251,7 +187,7 @@ function AdminAuditTable({ turns, users, onSelectTurn }) {
             <span className="admin-t-sess">{t.sessionTitle || '—'}</span>
             <span className="admin-t-prompt">{preview}</span>
             <span className={`admin-status admin-status-${status}`}>
-              {status === 'answered' && `${citeCount} cite${citeCount !== 1 ? 's' : ''}`}
+              {status === 'answered' && `${citeCount} citation${citeCount !== 1 ? 's' : ''}`}
               {status === 'no-context' && 'no context'}
               {status === 'failed' && 'ingest fail'}
               {status === 'pending' && '—'}
@@ -263,9 +199,162 @@ function AdminAuditTable({ turns, users, onSelectTurn }) {
   );
 }
 
+function getQueryStatus(turn) {
+  if (turn.output?.noContext) return { key: 'no-context', label: 'No context' };
+  if (!turn.output) return { key: 'pending', label: 'Pending' };
+  const citeCount = turn.output?.cites?.length || 0;
+  return {
+    key: 'answered',
+    label: `${citeCount} citation${citeCount !== 1 ? 's' : ''}`,
+  };
+}
+
+function getTurnPreview(turn, max = 72) {
+  const text = turn.input?.text || '(empty prompt)';
+  return text.slice(0, max) + (text.length > max ? '...' : '');
+}
+
+function sortTurns(turns) {
+  return [...turns].sort((a, b) => b.at - a.at);
+}
+
+function makeSessionKey(turn) {
+  return `${turn.scope || 'project'}:${turn.projectId || 'general'}:${turn.sessionId || 'none'}`;
+}
+
+function sessionFromTurn(turn) {
+  return {
+    id: makeSessionKey(turn),
+    sessionId: turn.sessionId,
+    title: turn.sessionTitle || 'Untitled session',
+    projectId: turn.projectId,
+    projectName: turn.projectName || 'General chat',
+    scope: turn.scope || 'project',
+    when: formatAuditTime(turn.at),
+    latestAt: turn.at || 0,
+    messageCount: 0,
+    turns: [],
+  };
+}
+
+function groupTurnsIntoSessions(turns) {
+  const bySession = {};
+  sortTurns(turns.filter(t => t.type === 'query.turn')).forEach(turn => {
+    const key = makeSessionKey(turn);
+    if (!bySession[key]) bySession[key] = sessionFromTurn(turn);
+    bySession[key].latestAt = Math.max(bySession[key].latestAt, turn.at || 0);
+    bySession[key].turns.push(turn);
+  });
+  return Object.values(bySession).sort((a, b) => b.latestAt - a.latestAt);
+}
+
+function getUserSessions(user, turns) {
+  return groupTurnsIntoSessions(turns.filter(t => t.actorId === user.id));
+}
+
+function getProjectSessions(project, turns) {
+  const bySession = {};
+  (project.sessions || []).forEach(session => {
+    const key = `project:${project.id}:${session.id}`;
+    bySession[key] = {
+      id: key,
+      sessionId: session.id,
+      title: session.title || 'Untitled session',
+      projectId: project.id,
+      projectName: project.name,
+      scope: 'project',
+      when: session.when || (session.whenDate ? formatAuditTime(session.whenDate) : '—'),
+      latestAt: session.whenDate || 0,
+      messageCount: session.messages?.length || 0,
+      turns: [],
+    };
+  });
+
+  sortTurns(turns.filter(t => t.projectId === project.id && t.type === 'query.turn')).forEach(turn => {
+    const key = makeSessionKey(turn);
+    if (!bySession[key]) bySession[key] = sessionFromTurn(turn);
+    bySession[key].latestAt = Math.max(bySession[key].latestAt, turn.at || 0);
+    bySession[key].turns.push(turn);
+  });
+
+  return Object.values(bySession).sort((a, b) => b.latestAt - a.latestAt);
+}
+
+function AdminSessionList({ sessions, onSelectTurn, emptyLabel = 'No recorded sessions.' }) {
+  const [openIds, setOpenIds] = useState({});
+  const [visibleCount, setVisibleCount] = useState(10);
+  const visibleSessions = sessions.slice(0, visibleCount);
+
+  if (sessions.length === 0) {
+    return <p className="admin-muted">{emptyLabel}</p>;
+  }
+
+  const toggle = (id) => {
+    setOpenIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  return (
+    <div className="admin-session-list">
+      {visibleSessions.map(session => {
+        const isOpen = !!openIds[session.id];
+        return (
+          <div className="admin-session-card" key={session.id}>
+            <button
+              type="button"
+              className="admin-session-row"
+              aria-expanded={isOpen}
+              onClick={() => toggle(session.id)}
+            >
+              <span className="admin-session-chev" aria-hidden>{isOpen ? '⌄' : '›'}</span>
+              <span className="admin-session-title">{session.title}</span>
+              <span className="admin-session-project">{session.projectName}</span>
+              <span className="admin-session-meta">
+                {session.turns.length} quer{session.turns.length === 1 ? 'y' : 'ies'}
+              </span>
+              <span className="admin-session-when">{session.latestAt ? formatAuditTime(session.latestAt) : session.when}</span>
+            </button>
+            {isOpen && (
+              <div className="admin-session-queries">
+                {session.turns.length === 0 ? (
+                  <div className="admin-query-empty">No recorded queries in this session.</div>
+                ) : (
+                  session.turns.map(turn => {
+                    const status = getQueryStatus(turn);
+                    return (
+                      <button
+                        type="button"
+                        key={turn.id}
+                        className="admin-query-row"
+                        onClick={() => onSelectTurn(turn.id)}
+                      >
+                        <span className="admin-query-when">{formatAuditTime(turn.at)}</span>
+                        <span className="admin-query-prompt">{getTurnPreview(turn, 92)}</span>
+                        <span className={`admin-query-status admin-status-${status.key}`}>{status.label}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {visibleCount < sessions.length && (
+        <button
+          type="button"
+          className="admin-more"
+          onClick={() => setVisibleCount(n => Math.min(n + 10, sessions.length))}
+        >
+          More sessions
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AdminTurnDetail({ turn, users, snippets, onBack, onFilterUser, onFilterProject }) {
   if (!turn) {
-    return <div className="admin-empty">Select a query turn from the audit log.</div>;
+    return <div className="admin-empty">Select a query from the audit log.</div>;
   }
   const actor = resolveActor(turn.actorId, users);
   const citeEntries = (turn.output?.cites || []).map(id => ({ id, snip: snippets[id] })).filter(x => x.snip);
@@ -274,7 +363,7 @@ function AdminTurnDetail({ turn, users, snippets, onBack, onFilterUser, onFilter
     <div className="admin-detail">
       <button type="button" className="admin-back" onClick={onBack}>← Audit log</button>
       <div className="admin-detail-head">
-        <h2 className="admin-detail-title">Query turn</h2>
+        <h2 className="admin-detail-title">Query</h2>
         <span className="admin-detail-meta">{formatAuditTimestamp(turn.at)}</span>
       </div>
 
@@ -385,9 +474,9 @@ function AdminUsersList({ users, onSelectUser }) {
   );
 }
 
-function AdminUserDetail({ user, turns, adminProjects, onBack, onSelectTurn }) {
+function AdminUserDetail({ user, turns, onBack, onSelectTurn, onSelectProject }) {
   if (!user) return <div className="admin-empty">Select a user.</div>;
-  const userTurns = turns.filter(t => t.actorId === user.id && t.type === 'query.turn').slice(0, 20);
+  const userSessions = getUserSessions(user, turns);
 
   return (
     <div className="admin-detail">
@@ -401,46 +490,26 @@ function AdminUserDetail({ user, turns, adminProjects, onBack, onSelectTurn }) {
         <h3 className="admin-section-title">Project memberships</h3>
         <div className="admin-memberships">
           {user.projects.map(m => (
-            <div className="admin-membership" key={m.projectId}>
+            <button
+              type="button"
+              className="admin-membership admin-membership-link"
+              key={m.projectId}
+              onClick={() => onSelectProject(m.projectId)}
+            >
               <span className="admin-membership-name">{m.projectName}</span>
               <span className="admin-role-pill">{m.role}</span>
-            </div>
+            </button>
           ))}
         </div>
       </section>
 
       <section className="admin-section">
-        <h3 className="admin-section-title">Recent query turns</h3>
-        {userTurns.length === 0 ? (
-          <p className="admin-muted">No recorded queries for this user.</p>
-        ) : (
-          <div className="admin-mini-list">
-            {userTurns.map(t => (
-              <button type="button" key={t.id} className="admin-mini-row" onClick={() => onSelectTurn(t.id)}>
-                <span className="admin-mini-when">{formatAuditTime(t.at)}</span>
-                <span className="admin-mini-proj">{t.projectName}</span>
-                <span className="admin-mini-prompt">{(t.input?.text || '').slice(0, 60)}…</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="admin-section">
-        <h3 className="admin-section-title">Sessions authored</h3>
-        <div className="admin-mini-list">
-          {adminProjects.flatMap(p =>
-            (p.sessions || [])
-              .filter(s => s.author === user.id)
-              .map(s => (
-                <div key={`${p.id}-${s.id}`} className="admin-mini-row static">
-                  <span className="admin-mini-proj">{p.name}</span>
-                  <span>{s.title}</span>
-                  <span className="admin-mini-when">{s.when}</span>
-                </div>
-              ))
-          )}
-        </div>
+        <h3 className="admin-section-title">Recent sessions</h3>
+        <AdminSessionList
+          sessions={userSessions}
+          onSelectTurn={onSelectTurn}
+          emptyLabel="No recorded sessions for this user."
+        />
       </section>
     </div>
   );
@@ -473,7 +542,7 @@ function AdminProjectsList({ adminProjects, onSelectProject }) {
 
 function AdminProjectDetail({ project, turns, onBack, onSelectTurn }) {
   if (!project) return <div className="admin-empty">Select a project.</div>;
-  const projectTurns = turns.filter(t => t.projectId === project.id && t.type === 'query.turn').slice(0, 15);
+  const projectSessions = getProjectSessions(project, turns);
 
   const statusLabel = { ok: 'indexed', proc: 'indexing', fail: 'failed' };
 
@@ -486,12 +555,26 @@ function AdminProjectDetail({ project, turns, onBack, onSelectTurn }) {
       </div>
 
       <section className="admin-section">
+        <h3 className="admin-section-title">Sessions</h3>
+        <AdminSessionList
+          sessions={projectSessions}
+          onSelectTurn={onSelectTurn}
+          emptyLabel="No recorded sessions for this project."
+        />
+      </section>
+
+      <section className="admin-section">
         <h3 className="admin-section-title">Members ({project.users?.length || 0})</h3>
         <div className="admin-memberships">
           {(project.users || []).map(u => (
             <div className="admin-membership" key={u.id}>
-              <span>{u.name}</span>
-              <span className="admin-role-pill">{u.role}</span>
+              <span className="admin-membership-main">
+                <span>{u.name}</span>
+                <span className="admin-role-pill">{u.role}</span>
+              </span>
+              <button type="button" className="admin-remove-member" title="Remove member">
+                Remove
+              </button>
             </div>
           ))}
         </div>
@@ -519,31 +602,6 @@ function AdminProjectDetail({ project, turns, onBack, onSelectTurn }) {
               + {(project.fileCount - project.files.length).toLocaleString()} more files in corpus (not listed)
             </div>
           )}
-        </div>
-      </section>
-
-      <section className="admin-section">
-        <h3 className="admin-section-title">All sessions</h3>
-        <div className="admin-mini-list">
-          {(project.sessions || []).map(s => (
-            <div key={s.id} className="admin-mini-row static">
-              <span>{s.title}</span>
-              <span className="admin-mini-when">{s.when}</span>
-              <span className="admin-muted">{s.messages?.length || 0} msgs</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="admin-section">
-        <h3 className="admin-section-title">Query turns in this project</h3>
-        <div className="admin-mini-list">
-          {projectTurns.map(t => (
-            <button type="button" key={t.id} className="admin-mini-row" onClick={() => onSelectTurn(t.id)}>
-              <span className="admin-mini-when">{formatAuditTime(t.at)}</span>
-              <span className="admin-mini-prompt">{(t.input?.text || '').slice(0, 70)}…</span>
-            </button>
-          ))}
         </div>
       </section>
     </div>
@@ -579,7 +637,7 @@ function AdminView({ store }) {
         turns: [],
         users: [],
         adminProjects: [],
-        summary: { projectCount: 0, userCount: 0, fileCount: 0, queryCount: 0, noContextCount: 0 },
+        summary: { projectCount: 0, userCount: 0, fileCount: 0, queryCount: 0 },
         insights: null,
       };
     }
@@ -587,12 +645,9 @@ function AdminView({ store }) {
   const { turns, users, adminProjects, summary, insights } = indexes;
 
   const filteredTurns = useMemo(() => {
-    const q = (adminFilters.query || '').toLowerCase();
     return turns.filter(t => {
       if (adminFilters.userId && t.actorId !== adminFilters.userId) return false;
       if (adminFilters.projectId && t.projectId !== adminFilters.projectId) return false;
-      if (adminFilters.eventType && adminFilters.eventType !== 'all' && t.type !== adminFilters.eventType) return false;
-      if (q && !(t.input?.text || '').toLowerCase().includes(q) && !(t.projectName || '').toLowerCase().includes(q)) return false;
       return true;
     });
   }, [turns, adminFilters]);
@@ -666,7 +721,6 @@ function AdminView({ store }) {
               users={users}
               onSelectTurn={(id) => setAdminSelection({ type: 'turn', id })}
             />
-            <AdminAnalyticsPlaceholder />
           </>
         )}
 
@@ -694,11 +748,14 @@ function AdminView({ store }) {
           <AdminUserDetail
             user={selectedUser}
             turns={turns}
-            adminProjects={adminProjects}
             onBack={() => setAdminSelection(null)}
             onSelectTurn={(id) => {
               setAdminTab('audit');
               setAdminSelection({ type: 'turn', id });
+            }}
+            onSelectProject={(id) => {
+              setAdminTab('projects');
+              setAdminSelection({ type: 'project', id });
             }}
           />
         )}

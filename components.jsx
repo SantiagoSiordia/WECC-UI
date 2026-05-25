@@ -144,7 +144,7 @@ function getAdminBreadcrumbDetail(store) {
   if (adminSelection.type === 'turn') {
     const t = turns.find(x => x.id === adminSelection.id);
     const text = t?.input?.text || '';
-    return text ? text.slice(0, 42) + (text.length > 42 ? '…' : '') : 'Query turn';
+    return text ? text.slice(0, 42) + (text.length > 42 ? '…' : '') : 'Query';
   }
   if (adminSelection.type === 'user') {
     return users.find(u => u.id === adminSelection.id)?.name || 'User';
@@ -285,15 +285,15 @@ function TopbarAuditButton({ store }) {
       type="button"
       className={'topbar-audit-pill' + (adminUnlocked ? ' unlocked' : ' locked')}
       onClick={requestAdmin}
-      title={adminUnlocked ? 'Open audit view' : 'Unlock audit view (demo passcode)'}
-      aria-label={adminUnlocked ? 'Open audit view' : 'Unlock audit view'}
+      title={adminUnlocked ? 'Open admin view' : 'Unlock admin view (demo passcode)'}
+      aria-label={adminUnlocked ? 'Open admin view' : 'Unlock admin view'}
     >
       {!adminUnlocked && (
         <span className="audit-lock" aria-hidden>
           <Icon name="lock" size={11}/>
         </span>
       )}
-      <span className="audit-label">Audit</span>
+      <span className="audit-label">Admin</span>
       {!adminUnlocked && <span className="audit-badge">locked</span>}
     </button>
   );

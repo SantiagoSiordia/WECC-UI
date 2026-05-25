@@ -79,12 +79,10 @@ function SourceDrawer({ open, snipId, onClose }) {
 }
 
 // ── FileLibrary ───────────────────────────────────────────────────────
-// Full-page overlay showing every file in the active project with search,
-// faceted kind filter, and pin status. Driven externally; close via ✕.
+// Full-page overlay showing every file in the active project with search
+// and pin status. Driven externally; close via ✕.
 function FileLibrary({ open, project, onClose }) {
   const [query, setQuery] = useState('');
-  const [kind, setKind] = useState('all');
-  const [pinnedOnly, setPinnedOnly] = useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -101,11 +99,11 @@ function FileLibrary({ open, project, onClose }) {
   const total = project.fileCountTotal || seedFiles.length;
 
   // Faux additional files for visual density
-  const FAUX_KINDS = ['patent','contract','letter','minutes','financial','marketing'];
+  const FAUX_FILE_GROUPS = ['patent','contract','letter','minutes','financial','marketing'];
   const fauxCount = Math.max(0, total - seedFiles.length);
   const fauxFiles = [];
   for (let i = 0; i < Math.min(fauxCount, 60); i++) {
-    const k = FAUX_KINDS[i % FAUX_KINDS.length];
+    const k = FAUX_FILE_GROUPS[i % FAUX_FILE_GROUPS.length];
     const stems = {
       patent: ['EP-3-217-901','US-9,124,338','WO/2019/103441','US-10,887,116','EP-3-441-208'],
       contract: ['MSA-2021-ProcessCore','SOW-2023-04-DataPipe','NDA-2019-Quorum','License-2020-Vortex','Reseller-2022-Halcyon'],
@@ -121,20 +119,11 @@ function FileLibrary({ open, project, onClose }) {
       status: 'ok',
       added: i < 6 ? 'today' : i < 18 ? 'this week' : 'older',
       pinned: false,
-      kind: k,
     });
   }
   const allFiles = [...seedFiles, ...fauxFiles];
 
-  const facets = ['all','patent','contract','letter','minutes','financial','marketing'];
-  const counts = facets.reduce((m, f) => {
-    m[f] = f === 'all' ? allFiles.length : allFiles.filter(x => x.kind === f).length;
-    return m;
-  }, {});
-
   const filtered = allFiles.filter(f => {
-    if (pinnedOnly && !f.pinned) return false;
-    if (kind !== 'all' && f.kind !== kind) return false;
     if (query && !f.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -160,52 +149,25 @@ function FileLibrary({ open, project, onClose }) {
       </div>
 
       <div className="lib-body">
-        <aside className="lib-side">
-          <div className="lib-search">
-            <Icon name="search" size={13}/>
-            <input
-              autoFocus
-              placeholder="Search files…"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="lib-side-label">KIND</div>
-          {facets.map(f => (
-            <button
-              key={f}
-              className={`lib-facet ${kind === f ? 'on' : ''}`}
-              onClick={() => setKind(f)}
-            >
-              <span style={{flex:1, textTransform:'capitalize'}}>{f}</span>
-              <span className="cnt">{counts[f]}</span>
-            </button>
-          ))}
-
-          <div className="lib-side-label" style={{marginTop:18}}>VIEW</div>
-          <button
-            className={`lib-facet ${pinnedOnly ? 'on' : ''}`}
-            onClick={() => setPinnedOnly(p => !p)}
-          >
-            <span style={{flex:1}}>Pinned only</span>
-            <span className="cnt">{allFiles.filter(f => f.pinned).length}</span>
-          </button>
-          <div style={{marginTop:14, padding:'0 4px', fontSize:11, color:'var(--whisper)', lineHeight:1.5, fontFamily:'var(--mono)'}}>
-            Pinned files are surfaced first to retrieval and shown at the top of every answer's citation chip strip.
-          </div>
-        </aside>
-
         <div className="lib-main">
           <div className="lib-toolbar">
+            <div className="lib-search lib-search-inline">
+              <Icon name="search" size={13}/>
+              <input
+                autoFocus
+                placeholder="Search files in this project…"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
+            </div>
             <div className="lib-result-count">
               {filtered.length === allFiles.length
                 ? `${filtered.length.toLocaleString()} files`
                 : `${filtered.length.toLocaleString()} of ${allFiles.length.toLocaleString()}`}
-              {(query || kind !== 'all' || pinnedOnly) && (
+              {query && (
                 <button
                   className="lib-clear"
-                  onClick={() => { setQuery(''); setKind('all'); setPinnedOnly(false); }}
+                  onClick={() => setQuery('')}
                 >clear</button>
               )}
             </div>
@@ -219,7 +181,6 @@ function FileLibrary({ open, project, onClose }) {
             <div className="lib-row-head">
               <span className="lib-c-pin"/>
               <span className="lib-c-name">Name</span>
-              <span className="lib-c-kind">Kind</span>
               <span className="lib-c-size">Size</span>
               <span className="lib-c-added">Added</span>
               <span className="lib-c-status">Status</span>
@@ -232,9 +193,6 @@ function FileLibrary({ open, project, onClose }) {
                 <span className="lib-c-name">
                   <Icon name="file" size={11}/>
                   <span className="nm">{f.name}</span>
-                </span>
-                <span className="lib-c-kind">
-                  <span className={`lib-kind k-${f.kind || 'misc'}`}>{f.kind || 'misc'}</span>
                 </span>
                 <span className="lib-c-size">{f.size || '—'}</span>
                 <span className="lib-c-added">{f.added || '—'}</span>
